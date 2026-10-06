@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>sankey iceberg</title>
+  <style>
+    :root {
+      --paper: #e3e5dd;
+      --grid:  #211b1422;
+      --ink:      #211b14;
+      --ink-soft: #6b6559;
+      --money-in:    #2f5d5a;
+      --money-spent: #6b6559;
+      --money-kept:  #40407a;
+      --money-lost:  #cc2e22;
+    }
+
+    body { margin: 0; }
+
+    #Viewport {
+      position: relative;
+      width: 12000px;
+      height: 4500px;
+      background-color: var(--paper);
+      background-image:
+        repeating-linear-gradient(0deg,  var(--grid) 0 1px, transparent 1px 26px),
+        repeating-linear-gradient(90deg, var(--grid) 0 1px, transparent 1px 26px);
+      overflow: hidden;
+    }
+
+    #SubjectMatter {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #TheYearPicker {
+      position: absolute; z-index: 100; top: 14px; left: 18px;
+      font-family: var(--font-mono); font-size: 16px; font-weight: 700;
+      color: var(--ink); background: var(--paper);
+      border: 1.5px solid var(--ink); border-radius: 4px;
+      padding: 4px 6px;
+    }
+
+    .OneBlock { fill: var(--ink); }
+
+    .OneFlow {
+      fill: none;
+      stroke: var(--ink-soft);
+      stroke-opacity: 0.55;
+    }
+
+    .IsMoneyIn    { stroke: var(--money-in); }
+    .IsMoneySpent { stroke: var(--money-spent); }
+    .IsMoneyLost  { stroke: var(--money-lost); }
+    .IsMoneyKept  { stroke: var(--money-kept); }
+    .IsMoneyCost  { stroke: var(--money-lost); stroke-opacity: 0.3; }
+
+    .OneFlowLabel {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      fill: var(--ink);
+    }
+    .OneAmount { fill: var(--ink-soft); }
+  </style>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+
+<script>
+const SmithsonianFilingsUrl = "https://projects.propublica.org/nonprofits/api/v2/organizations/530206027.json";
+const corsProxyKey = "263eb960";
+const proxiedFilingsUrl = "https://corsproxy.io/?key=" + corsProxyKey + "&url=" + encodeURIComponent(SmithsonianFilingsUrl);
+
+async function FetchTheSmithsonianFilings() {
+  const response = await fetch(proxiedFilingsUrl);
+  console.log("status:", response.status);
+  if (!response.ok) {
+    throw new Error("corsproxy answered " + response.status);
+  }
+  const wholeResponse = await response.json();
+  return wholeResponse;
+}
+
+function BuildTheBlocksAndFlows(oneFiling) {
+
+  const ArrayOfEveryHardCodedFlow = [
+    { from: "The pool (start of year)", to: "The pool",               amount: oneFiling.totassetsend - (oneFiling.totrevenue - oneFiling.totfuncexpns), fate: "in"    },
+    { from: "Total revenue",            to: "The pool",               amount: oneFiling.totrevenue,                                                      fate: "in"    },
+    { from: "The pool",                 to: "Total spending",         amount: oneFiling.totfuncexpns,                                                    fate: "spent" },
+    { from: "The pool",                 to: "The pool (end of year)", amount: oneFiling.totassetsend - (oneFiling.totrevenue - oneFiling.totfuncexpns), fate: "in"    },
+    { from: "The pool",                 to: "The pool (end of year)", amount: oneFiling.totrevenue - oneFiling.totfuncexpns,                             fate: "kept"  },
+
+    { from: "Rent (gross)",              to: "Net rental income",           amount: oneFiling.grsrntsreal,   fate: "in" },
+    { from: "Securities sold (gross)",   to: "Net gain on sales of assets", amount: oneFiling.grsalesecur,   fate: "in" },
+    { from: "Other assets sold (gross)", to: "Net gain on sales of assets", amount: oneFiling.grsalesothr,   fate: "in" },
+    { from: "Fundraising (gross)",       to: "Fundraising events",          amount: oneFiling.grsincfndrsng, fate: "in" },
+    { from: "Gift shop sold (gross)",    to: "Net gift shop sales",         amount: oneFiling.grsalesinvent, fate: "in" },
+
+    { from: "Net rental income",           to: "Rent expense",             amount: oneFiling.rntlexpnsreal,  fate: "cost" },
+    { from: "Net gain on sales of assets", to: "Cost basis securities",    amount: oneFiling.cstbasisecur,   fate: "cost" },
+    { from: "Net gain on sales of assets", to: "Cost basis other",         amount: oneFiling.cstbasisothr,   fate: "cost" },
+    { from: "Fundraising events",          to: "Fundraising direct costs", amount: oneFiling.lessdirfndrsng, fate: "cost" },
+    { from: "Net gift shop sales",         to: "Cost of goods sold",       amount: oneFiling.lesscstofgoods, fate: "cost" },
+
+    { from: "Contributions and grants",    to: "Total revenue", amount: oneFiling.totcntrbgfts,        fate: "in" },
+    { from: "Program services",            to: "Total revenue", amount: oneFiling.totprgmrevnue,       fate: "in" },
+    { from: "Investment income",           to: "Total revenue", amount: oneFiling.invstmntinc,         fate: "in" },
+    { from: "Tax-exempt bond proceeds",    to: "Total revenue", amount: oneFiling.txexmptbndsproceeds, fate: "in" },
+    { from: "Royalties",                   to: "Total revenue", amount: oneFiling.royaltsinc,          fate: "in" },
+    { from: "Net rental income",           to: "Total revenue", amount: oneFiling.netrntlinc,          fate: "in" },
+    { from: "Net gain on sales of assets", to: "Total revenue", amount: oneFiling.netgnls,             fate: "in" },
+    { from: "Net gift shop sales",         to: "Total revenue", amount: oneFiling.netincsales,         fate: "in" },
+    { from: "Miscellaneous",               to: "Total revenue", amount: oneFiling.miscrevtot11e,       fate: "in" },
+    { from: "Gaming",                      to: "Total revenue", amount: oneFiling.netincgaming,        fate: "in" },
+
+    { from: "Total revenue", to: "Negative: Fundraising events", amount: -oneFiling.netincfndrsng, fate: "lost" },
+
+    { from: "Total spending", to: "Officer pay",              amount: oneFiling.compnsatncurrofcr, fate: "spent" },
+    { from: "Total spending", to: "Salaries and wages",       amount: oneFiling.othrsalwages,      fate: "spent" },
+    { from: "Total spending", to: "Payroll taxes",            amount: oneFiling.payrolltx,         fate: "spent" },
+    { from: "Total spending", to: "Professional fundraisers", amount: oneFiling.profndraising,     fate: "spent" },
+    { from: "Total spending", to: "Everything else spent",    amount: oneFiling.totfuncexpns - (oneFiling.compnsatncurrofcr + oneFiling.othrsalwages + oneFiling.payrolltx + oneFiling.profndraising), fate: "spent" },
+  ];
+
+  const ArrayOfAllBlocks = [];
+  const ArrayOfAllFlows = [];
+
+  function FindOrMakeBlock(blockName) {
+    let position = ArrayOfAllBlocks.findIndex(oneBlock => oneBlock.name === blockName);
+    if (position === -1) {
+      ArrayOfAllBlocks.push({ name: blockName });
+      position = ArrayOfAllBlocks.length - 1;
+    }
+    return position;
+  }
+
+  ArrayOfEveryHardCodedFlow.forEach(oneLine => {
+    if (oneLine.amount > 0) {
+      ArrayOfAllFlows.push({
+        source: FindOrMakeBlock(oneLine.from),
+        target: FindOrMakeBlock(oneLine.to),
+        value:  oneLine.amount,
+        fate:   oneLine.fate
+      });
+    }
+  });
+
+  return { nodes: ArrayOfAllBlocks, links: ArrayOfAllFlows };
+}
+</script>
+</head>
+
+<body>
+  <div id="Viewport">
+    <select id="TheYearPicker"></select>
+    <svg id="SubjectMatter"></svg>
+  </div>
+
+  <script>
+  const svgSelection = d3.select("#SubjectMatter");
+
+  const pixelsPerDollar     = 4e-7;
+  const blockThickness      = 18;
+  const smallestBlockHeight = 6;
+  const smallestFlowWidth   = 2;
+  const bezierControlReach  = 0.45;
+
+  const sceneContainerElement = document.getElementById("Viewport");
+  let sceneWidth  = sceneContainerElement.offsetWidth;
+  let sceneHeight = sceneContainerElement.offsetHeight;
+
+  let ArrayOfAllFilingObjects = [];
+  let yearOnStage = null;
+
+  function blockHeightForAmount(amountInDollars) {
+    return Math.max(smallestBlockHeight, Math.abs(amountInDollars) * pixelsPerDollar);
+  }
+
+  function flowWidthForAmount(amountInDollars) {
+    return Math.max(smallestFlowWidth, Math.abs(amountInDollars) * pixelsPerDollar);
+  }
+
+  function buildBezierPathForOneFlow(oneFlow) {
+    const sx = oneFlow.source.x + blockThickness;
+    const sy = oneFlow.source.y + oneFlow.source.height / 2;
+    const tx = oneFlow.target.x;
+    const ty = oneFlow.target.y + oneFlow.target.height / 2;
+    const reach = Math.max(80, Math.abs(tx - sx) * bezierControlReach);
+    return "M" + sx + "," + sy +
+           " C" + (sx + reach) + "," + sy + " " + (tx - reach) + "," + ty + " " + tx + "," + ty;
+  }
+
+  function DrawTheSankey(oneFiling) {
+    const theGraph = BuildTheBlocksAndFlows(oneFiling);
+    const ArrayOfAllBlocks = theGraph.nodes;
+    const ArrayOfAllFlows  = theGraph.links;
+
+    ArrayOfAllFlows.forEach(oneFlow => {
+      oneFlow.source = ArrayOfAllBlocks[oneFlow.source];
+      oneFlow.target = ArrayOfAllBlocks[oneFlow.target];
+    });
+
+    ArrayOfAllBlocks.forEach(oneBlock => {
+      oneBlock.incomingFlows = [];
+      oneBlock.outgoingFlows = [];
+    });
+    ArrayOfAllFlows.forEach(oneFlow => {
+      oneFlow.source.outgoingFlows.push(oneFlow);
+      oneFlow.target.incomingFlows.push(oneFlow);
+    });
+
+    ArrayOfAllBlocks.forEach(oneBlock => {
+      const sumOfIncoming = d3.sum(oneBlock.incomingFlows, oneFlow => oneFlow.value);
+      const sumOfOutgoing = d3.sum(oneBlock.outgoingFlows, oneFlow => oneFlow.value);
+      oneBlock.value  = Math.max(sumOfIncoming, sumOfOutgoing, 0);
+      oneBlock.height = blockHeightForAmount(oneBlock.value);
+    });
+
+    ArrayOfAllFlows.forEach(oneFlow => {
+      oneFlow.width = flowWidthForAmount(oneFlow.value);
+    });
+
+    ArrayOfAllBlocks.forEach((oneBlock, blockIndex) => {
+      oneBlock.x = 400 + (blockIndex % 8) * 1450;
+      oneBlock.y = 300 + Math.floor(blockIndex / 8) * 1000;
+    });
+
+    const everyFlow = svgSelection.append("g")
+      .selectAll("path")
+      .data(ArrayOfAllFlows)
+      .join("path")
+        .attr("class", "OneFlow")
+        .classed("IsMoneyIn",    oneFlow => oneFlow.fate === "in")
+        .classed("IsMoneySpent", oneFlow => oneFlow.fate === "spent")
+        .classed("IsMoneyLost",  oneFlow => oneFlow.fate === "lost")
+        .classed("IsMoneyKept",  oneFlow => oneFlow.fate === "kept")
+        .classed("IsMoneyCost",  oneFlow => oneFlow.fate === "cost")
+        .attr("d", buildBezierPathForOneFlow)
+        .attr("stroke-width", oneFlow => Math.max(1, oneFlow.width));
+
+    everyFlow.append("title")
+      .text(oneFlow => oneFlow.source.name + " to " + oneFlow.target.name + ": $" + oneFlow.value.toLocaleString());
+
+    const everyBlock = svgSelection.append("g")
+      .selectAll("rect")
+      .data(ArrayOfAllBlocks)
+      .join("rect")
+        .attr("class", "OneBlock")
+        .attr("x", oneBlock => oneBlock.x)
+        .attr("y", oneBlock => oneBlock.y)
+        .attr("width",  blockThickness)
+        .attr("height", oneBlock => oneBlock.height);
+
+    everyBlock.append("title")
+      .text(oneBlock => oneBlock.name + ": $" + oneBlock.value.toLocaleString());
+  }
+
+  function FillTheYearPicker() {
+    d3.select("#TheYearPicker")
+      .selectAll("option")
+      .data(ArrayOfAllFilingObjects, oneFiling => oneFiling.tax_prd_yr)
+      .join("option")
+        .attr("value", oneFiling => oneFiling.tax_prd_yr)
+        .text(oneFiling => oneFiling.tax_prd_yr);
+  }
+
+  function DrawEverything() {
+    if (ArrayOfAllFilingObjects.length === 0) return;
+    const filingOnStage = ArrayOfAllFilingObjects.find(oneFiling => oneFiling.tax_prd_yr === yearOnStage);
+    svgSelection.selectAll("*").remove();
+    svgSelection.attr("viewBox", `0 0 ${sceneWidth} ${sceneHeight}`);
+    DrawTheSankey(filingOnStage);
+  }
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    try {
+      const wholeResponse = await FetchTheSmithsonianFilings();
+      ArrayOfAllFilingObjects = wholeResponse.filings_with_data;
+      yearOnStage = ArrayOfAllFilingObjects[0].tax_prd_yr;
+      FillTheYearPicker();
+      DrawEverything();
+    } catch (whatWentWrong) {
+      console.log("the fetch failed:", whatWentWrong.message);
+    }
+  });
+
+  function changeYearAction(changeEvent) {
+    yearOnStage = Number(changeEvent.target.value);
+    DrawEverything();
+  }
+
+  d3.select("#TheYearPicker").on("change", changeYearAction);
+  </script>
+</body>
+</html>
